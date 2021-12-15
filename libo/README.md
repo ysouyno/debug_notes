@@ -6,10 +6,26 @@
 
 <!-- markdown-toc end -->
 
-| OS      | COMMIT                                   |
-| :-:     | :-:                                      |
-| WINDOWS |                                          |
-| LINUX   | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9 |
+| PLATFORM | COMMIT/BRANCH                            | BUILD TIEM |
+| :-:      | :-:                                      |        :-: |
+| WINDOWS  | 28d43b69651289dca7b62341726ae9771ba30e2c | 2021-11-16 |
+| LINUX    | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9 | 2021-11-13 |
+| LINUX    | libreoffice-7-3                          | 2021-12-15 |
+
+``` shellsession
+# autogen.lastrun for windows
+--with-ant-home=/cygdrive/d/cygwin64/home/user1328/sources/apache-ant-1.9.5
+--with-jdk-home=/cygdrive/d/dnld/jdk-11.0.11+9
+--enable-pch
+--disable-ccache
+--disable-odk
+--disable-online-update
+--without-junit
+--enable-dbgutil
+
+# autogen.lastrun for linux
+--enable-dbgutil
+```
 
 # <2021-12-13 周一> 调试`libo-7.3`的`emf`流程（一）
 
