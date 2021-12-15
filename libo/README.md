@@ -4,6 +4,7 @@
 - [<2021-12-13 周一> 调试`libo-7.3`的`emf`流程（一）](#2021-12-13-周一-调试libo-73的emf流程一)
 - [<2021-12-14 Tue> 调试`libo-7.3`的`emf`流程（二）](#2021-12-14-tue-调试libo-73的emf流程二)
 - [<2021-12-15 Wed> 调试`libo-7.3`的`emf`流程（三）](#2021-12-15-wed-调试libo-73的emf流程三)
+    - [如何使用`libo`的`cppunit`来调试](#如何使用libo的cppunit来调试)
 
 <!-- markdown-toc end -->
 
@@ -214,3 +215,113 @@ export LD_LIBRARY_PATH=/home/ysouyno/libo_build/instdir/program
 不知道为什么`mtfdemo`运行结果是一个空白窗口，试了几张图片发现只有`TestPalette.wmf`能显示，可能是要显示的图片太大而窗口太小？但是不管怎么样，有此`mtfdemo.cxx`的代码还是很有参考价值的。
 
 此外还发现一处比较有价值的代码，这是在`libo-core/drawinglayer/README.md`中发现的，演示了如何从设备中获取`bitmap`的方法。
+
+## 如何使用`libo`的`cppunit`来调试
+
+今天又在发现怎么能更方便的调试`drawinglayer`，`vcl`等模块，可以参考如下操作。
+
+在“[Development/GenericBuildingHints#Single unit test run](https://wiki.documentfoundation.org/Development/GenericBuildingHints#Single_unit_test_run)”中找到了有价值的信息，但是这里讲得不太详细，我的步骤是：
+
+``` shellsession
+╭─ysouyno@arch ~/libo_build
+╰─➤  make CPPUNIT_TEST_NAME="testDrawBitmap" CppunitTest_vcl_outdev
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_vcl_outdev
+[CUT] vcl_outdev
+```
+
+要使用`gdb`调试的话：
+
+``` shellsession
+╭─ysouyno@arch ~/libo_build
+╰─➤  make CPPUNIT_TEST_NAME="testDrawBitmap" CppunitTest_vcl_outdev CPPUNITTRACE='gdb --args'
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_vcl_outdev
+[CUT] vcl_outdev
+<frozen importlib._bootstrap>:914: ImportWarning: GdbRemoveReadlineFinder.find_spec() not found; falling back to find_module()
+GNU gdb (GDB) 11.1
+Copyright (C) 2021 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-pc-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from /home/ysouyno/libo_build/workdir/LinkTarget/Executable/cppunittester...
+(gdb) start
+Temporary breakpoint 1 at 0x75c1: file /home/ysouyno/gits/libo-core/sal/cppunittester/cppunittester.cxx, line 609.
+...
+...
+...
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/libthread_db.so.1".
+
+Temporary breakpoint 1, main (argc=23, argv=0x7fffffff2268) at /home/ysouyno/gits/libo-core/sal/cppunittester/cppunittester.cxx:609
+609 SAL_IMPLEMENT_MAIN()
+(gdb) c
+Continuing.
+[_RUN_____] VclOutdevTest::testDrawBitmap
+VclOutdevTest::testDrawBitmap finished in: 41ms
+OK (1)
+[Inferior 1 (process 645935) exited normally]
+(gdb) quit
+```
+
+对于上面的命令`make CPPUNIT_TEST_NAME="testDrawBitmap" CppunitTest_vcl_outdev`是什么意思，这里的`CppunitTest_vcl_outdev`是指`libo-core/vcl/CppunitTest_vcl_outdev.mk`文件：
+
+``` shellsession
+╭─ysouyno@arch ~/libo_build
+╰─➤  ls ~/gits/libo-core/vcl/CppunitTest_vcl_outdev.mk
+/home/ysouyno/gits/libo-core/vcl/CppunitTest_vcl_outdev.mk
+```
+
+那`CPPUNIT_TEST_NAME="testDrawBitmap"`呢？看`CppunitTest_vcl_outdev.mk`的内容中有一行，如下：
+
+``` text
+$(eval $(call gb_CppunitTest_add_exception_objects,vcl_outdev, \
+    vcl/qa/cppunit/outdev \
+))
+```
+
+这代码将要运行`vcl/qa/cppunit/outdev.cxx`中的函数，该文件中有：
+
+``` c++
+╭─ysouyno@arch ~/libo_build
+╰─➤  cat ~/gits/libo-core/vcl/qa/cppunit/outdev.cxx | grep testDrawBitmap
+    void testDrawBitmap();
+    CPPUNIT_TEST(testDrawBitmap);
+void VclOutdevTest::testDrawBitmap()
+```
+
+如果随便搞一个`CPPUNIT_TEST_NAME`，比如用`test`来看看效果：
+
+``` shellsession
+╭─ysouyno@arch ~/libo_build
+╰─➤  make CPPUNIT_TEST_NAME="test" CppunitTest_vcl_outdev
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_vcl_outdev
+[CUT] vcl_outdev
+
+Fatal error: CPPUNIT_TEST_NAME contains no valid tests
+
+Error: a unit test failed, please do one of:
+
+make CppunitTest_vcl_outdev CPPUNITTRACE="gdb --args"
+    # for interactive debugging on Linux
+make CppunitTest_vcl_outdev VALGRIND=memcheck
+    # for memory checking
+make CppunitTest_vcl_outdev DEBUGCPPUNIT=TRUE
+    # for exception catching
+
+You can limit the execution to just one particular test by:
+
+make CPPUNIT_TEST_NAME="testXYZ" ...above mentioned params...
+
+make[1]: *** [/home/ysouyno/gits/libo-core/solenv/gbuild/CppunitTest.mk:121:
+/home/ysouyno/libo_build/workdir/CppunitTest/vcl_outdev.test] Error 1
+make: *** [Makefile:170: CppunitTest_vcl_outdev] Error 2
+```
