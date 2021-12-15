@@ -3,14 +3,15 @@
 
 - [<2021-12-13 周一> 调试`libo-7.3`的`emf`流程（一）](#2021-12-13-周一-调试libo-73的emf流程一)
 - [<2021-12-14 Tue> 调试`libo-7.3`的`emf`流程（二）](#2021-12-14-tue-调试libo-73的emf流程二)
+- [<2021-12-15 Wed> 调试`libo-7.3`的`emf`流程（三）](#2021-12-15-wed-调试libo-73的emf流程三)
 
 <!-- markdown-toc end -->
 
-| PLATFORM | COMMIT/BRANCH                            | BUILD TIEM |
-| :-:      | :-:                                      |        :-: |
-| WINDOWS  | 28d43b69651289dca7b62341726ae9771ba30e2c | 2021-11-16 |
-| LINUX    | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9 | 2021-11-13 |
-| LINUX    | libreoffice-7-3                          | 2021-12-15 |
+| PLATFORM | COMMIT/BRANCH                                            | BUILD TIEM |
+| :-:      | :-:                                                      |        :-: |
+| WINDOWS  | 28d43b69651289dca7b62341726ae9771ba30e2c                 | 2021-11-16 |
+| LINUX    | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9                 | 2021-11-13 |
+| LINUX    | 364c807cf22de7898e918a9cd1fa7e5392ca7577/libreoffice-7-3 | 2021-12-15 |
 
 ``` shellsession
 # autogen.lastrun for windows
@@ -197,3 +198,19 @@ info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1
 info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x0
 info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 0
 ```
+
+# <2021-12-15 Wed> 调试`libo-7.3`的`emf`流程（三）
+
+从`libo-core/vcl/README.GDIMetaFile.md`了解到原来自带了一个`vcl/workben/mtfdemo.cxx`来演示如何绘制`wmf`和`emf`图片，但是如何运行`mtfdemo`这个测试程序这里有坑。
+
+在这里`libo_build/workdir/LinkTarget/Executable/mtfdemo`找到了它，直接运行会提示缺少`so`文件，它所需要这些`so`位于`libo_build/instdir/program`目录中，但是即使你设置了环境变量`LD_LIBRARY_PATH`后仍然会出错：
+
+``` shell
+export LD_LIBRARY_PATH=/home/ysouyno/libo_build/instdir/program
+```
+
+正确的方法是既要设置环境变量`LD_LIBRARY_PATH`，又要将`mtfdemo`拷贝到`libo_build/instdir/program`目录中运行。我去，当我意识到这点时已经是花了三个小时重新编译完`libo`之后了。
+
+不知道为什么`mtfdemo`运行结果是一个空白窗口，试了几张图片发现只有`TestPalette.wmf`能显示，可能是要显示的图片太大而窗口太小？但是不管怎么样，有此`mtfdemo.cxx`的代码还是很有参考价值的。
+
+此外还发现一处比较有价值的代码，这是在`libo-core/drawinglayer/README.md`中发现的，演示了如何从设备中获取`bitmap`的方法。
