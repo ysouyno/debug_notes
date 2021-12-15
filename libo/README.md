@@ -2,8 +2,14 @@
 **Table of Contents**
 
 - [<2021-12-13 周一> 调试`libo-7.3`的`emf`流程（一）](#2021-12-13-周一-调试libo-73的emf流程一)
+- [<2021-12-14 Tue> 调试`libo-7.3`的`emf`流程（二）](#2021-12-14-tue-调试libo-73的emf流程二)
 
 <!-- markdown-toc end -->
+
+| OS      | COMMIT                                   |
+| :-:     | :-:                                      |
+| WINDOWS |                                          |
+| LINUX   | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9 |
 
 # <2021-12-13 周一> 调试`libo-7.3`的`emf`流程（一）
 
@@ -89,3 +95,89 @@ public:
 ```
 
 看到它的最后一个虚函数`createRedirectedPrimitive2DSequence()`的返回值是`drawinglayer::primitive2d::Primitive2DContainer`，这样暂时就把上面解析`emf`和这里绘制的代码结合起来了。
+
+# <2021-12-14 Tue> 调试`libo-7.3`的`emf`流程（二）
+
+不知从哪里得到的启示，查看了`libo`关于“[Visual Class Library (VCL)](https://docs.libreoffice.org/vcl.html)”的说明文档，经过半天的尝试，感觉此时我获得了一点用的信息，所以赶紧记录一下。
+
+搞了一个“[run_debug_libo_emf.sh](files/run_debug_libo_emf.sh)”，方便调试：
+
+``` shell
+#!/bin/bash
+
+OUT=$HOME/temp/libo_emf.log
+
+export SAL_LOG_FILE=$OUT
+
+if [ -f $OUT ]; then
+    rm -f $OUT
+    printf "delete: %s\n" $OUT
+fi
+
+export SAL_LOG=\
++INFO.vcl\
+-INFO.vcl.schedule\
+-INFO.vcl.unity\
+-INFO.vcl.virdev\
++INFO.emfio\
+-INFO.vcl.opengl\
++INFO.drawinglayer.emf\
++WARN.vcl.emf
+
+$HOME/libo_build/instdir/program/simpress
+```
+
+链接中提到用`export SAL_LOG=+INFO.cppcanvas.emf+INFO.vcl.emf`，发现没有相关日志输出，最终我换成了`+INFO.drawinglayer.emf`，发现有效果：
+
+``` shellsession
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/wmfemfhelper.cxx:2978: EMF+ passed to canvas mtf renderer - header info, size: 56
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:979: EMF+ picture frame: 1322,1323 - 6400,2117
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:981: EMF+ ref device pixel size: 2560x1440 mm size: 677x381
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:983: EMF+ base transform: [1 0 0; 0 1 0; 0 0 1]
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/wmfemfhelper.cxx:3010: EMF+ passed to canvas mtf renderer, size: 28
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1076: EMF+ EmfPlusRecordTypeHeader (0x4001)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1077: EMF+	 record size: 28
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 16
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1123: EMF+	Header: 0xdbc01002
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1124: EMF+	Version: 1
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1125: EMF+	Horizontal DPI: 96
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1126: EMF+	Vertical DPI: 96
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1127: EMF+	Dual: false
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/wmfemfhelper.cxx:3010: EMF+ passed to canvas mtf renderer, size: 132
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1076: EMF+ EmfPlusRecordTypeSetTextRenderingHint (0x401f)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1077: EMF+	 record size: 12
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x4
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1771: EMF+	 Text rendering hint: TextRenderingHintSingleBitPerPixel
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1076: EMF+ EmfPlusRecordTypeObject (0x4008)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1077: EMF+	 record size: 48
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x600
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 36
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:262: EMF+ Object: EmfPlusObjectTypeFont (0x1536)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:263: EMF+	Object slot: 0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:264: EMF+	Flags: 1536
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:52: EMF+	Header: 0xdbc01
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:53: EMF+	Version: 0x4098
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:54: EMF+	Size: 24
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:55: EMF+	Unit: UnitTypePixel (0x2)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:56: EMF+	Flags:  (0x0)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:57: EMF+	Reserved: 0x0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:58: EMF+	Length: 5
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfpfont.cxx:72: EMF+	Family: ARIAL
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1076: EMF+ EmfPlusRecordTypeDrawString (0x401c)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1077: EMF+	 record size: 72
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x8000
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 60
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1573: EMF+	 FontId: 0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1574: EMF+	 BrushId: ARGB: 0x800000ff
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1575: EMF+	 FormatId: 4294967295
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1576: EMF+	 Length: 16
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1582: EMF+	 DrawString layoutRect: 50,50 - 0x0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1585: EMF+	 DrawString string: Transparent Text
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/wmfemfhelper.cxx:3010: EMF+ passed to canvas mtf renderer, size: 12
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1076: EMF+ EmfPlusRecordTypeEndOfFile (0x4002)
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1077: EMF+	 record size: 12
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1078: EMF+	 flags: 0x0
+info:drawinglayer.emf:43305:43305:drawinglayer/source/tools/emfphelperdata.cxx:1079: EMF+	 data size: 0
+```
