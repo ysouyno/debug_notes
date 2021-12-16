@@ -430,3 +430,86 @@ ysouyno@arch ~/libo_build
 代码对比：
 
 ![](files/libo000.png)
+
+尝试修改解析代码，在解析完`emf`文件后将它输出到本地文件，代码修改：
+
+``` c++
+// libo-core/emfio/source/emfuno/xemfparser.cxx
+#include <vcl/virdev.hxx>
+#include <vcl/graphicfilter.hxx>
+
+aRetval.push_back(
+    new drawinglayer::primitive2d::MetafilePrimitive2D(
+        aMetafileTransform,
+        aMtf));
+
+// add by ysouyno
+ScopedVclPtrInstance< VirtualDevice > pVirtualDevice;
+aSize /= 2;
+pVirtualDevice->SetOutputSizePixel(aSize);
+/* pVirtualDevice->SetDrawMode(DrawModeFlags::Default); */
+pVirtualDevice->SetBackground(Color(0xff, 0xff, 0xff));
+pVirtualDevice->Erase();
+aMtf.Play(*pVirtualDevice, aMtf.GetActionSize());
+BitmapEx bmp = pVirtualDevice->GetBitmapEx(Point(0, 0), pVirtualDevice->GetOutputSizePixel());
+bmp.Scale(aSize / 10, BmpScaleFlag::Fast);
+SvFileStream stream("~/temp/bmp.png", StreamMode::WRITE | StreamMode::TRUNC);
+GraphicFilter::GetGraphicFilter().compressAsPNG(bmp, stream);
+```
+
+不是所有`emf`图片都能生成本地的`png`图片，可能与`emf`的图片大小有关，从`soffice.bin`的控制台输出可以看到有：
+
+``` text
+warn:vcl.gdi:756482:756482:vcl/headless/svpgdi.cxx:2277: SvpSalGraphics::getBitmap, cannot create bitmap
+```
+
+经调试发现问题在`libo-core/vcl/headless/svpbmp.cxx:114`中：
+
+``` c++
+bFail = o3tl::checked_multiply<size_t>(pDIB->mnHeight, pDIB->mnScanlineSize, size);
+SAL_WARN_IF(bFail, "vcl.gdi", "checked multiply failed");
+if (bFail || size > SAL_MAX_INT32/2)
+{
+    return nullptr;
+}
+```
+
+经过演算，这里`size`确实大于`SAL_MAX_INT32 / 2`。
+
+``` emacs-lisp
+;; SAL_MAX_INT32 / 2
+(/ 2147483647 2)
+
+;; emf size: 13981x19809
+;; pDIB->mnHeight * pDIB->mnScanlineSize = size
+(* 19809 (* 13981 4))
+```
+
+另我想在生成图片之前先进行缩放，再写文件，但是发现`GDIMetaFile`提供的`Scale`函数居然是个空实现：
+
+``` c++
+void GDIMetaFile::Scale( double fScaleX, double fScaleY )
+{
+    for( MetaAction* pAct = FirstAction(); pAct; pAct = NextAction() )
+    {
+        MetaAction* pModAct;
+
+        if( pAct->GetRefCount() > 1 )
+        {
+            m_aList[ m_nCurrentActionElement ] = pAct->Clone();
+            pModAct = m_aList[ m_nCurrentActionElement ].get();
+        }
+        else
+            pModAct = pAct;
+
+        pModAct->Scale( fScaleX, fScaleY );
+    }
+
+    m_aPrefSize.setWidth( FRound( m_aPrefSize.Width() * fScaleX ) );
+    m_aPrefSize.setHeight( FRound( m_aPrefSize.Height() * fScaleY ) );
+}
+
+void MetaAction::Scale( double, double )
+{
+}
+```
