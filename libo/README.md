@@ -5,10 +5,11 @@
 - [<2021-12-14 Tue> 调试`libo-7.3`的`emf`流程（二）](#2021-12-14-tue-调试libo-73的emf流程二)
 - [<2021-12-15 Wed> 调试`libo-7.3`的`emf`流程（三）](#2021-12-15-wed-调试libo-73的emf流程三)
     - [如何使用`libo`的`cppunit`来调试](#如何使用libo的cppunit来调试)
+- [<2021-12-16 Thu> 调试`libo-7.3`的`emf`流程（四）](#2021-12-16-thu-调试libo-73的emf流程四)
 
 <!-- markdown-toc end -->
 
-| PLATFORM | COMMIT/BRANCH                                            | BUILD TIEM |
+| PLATFORM | COMMIT/BRANCH                                            | BUILD TIME |
 | :-:      | :-:                                                      |        :-: |
 | WINDOWS  | 28d43b69651289dca7b62341726ae9771ba30e2c                 | 2021-11-16 |
 | LINUX    | 79589afe173ba8f17bfbbc6b38f0dfbc5fd9e0c9                 | 2021-11-13 |
@@ -325,3 +326,107 @@ make[1]: *** [/home/ysouyno/gits/libo-core/solenv/gbuild/CppunitTest.mk:121:
 /home/ysouyno/libo_build/workdir/CppunitTest/vcl_outdev.test] Error 1
 make: *** [Makefile:170: CppunitTest_vcl_outdev] Error 2
 ```
+
+# <2021-12-16 Thu> 调试`libo-7.3`的`emf`流程（四）
+
+我目前想要的结果是通过`libo`解析一张`emf`图片，保存为本地的一张可以看得见的`bmp`或者`jpg`图片，因此我在`vscode`里搜索所有含有`.bmp`的代码发现了一个关键字`StreamMode::READ`，这样的话，再通过`StreamMode::WRITE`可以发现两个有用的`cppunit test`：
+
+``` text
+libo-core/drawinglayer/qa/unit/vclmetafileprocessor2d.cxx
+libo-core/vcl/qa/cppunit/BackendTest.cxx
+```
+
+如何组合`make`命令原来是个体力活：
+
+``` shellsession
+ysouyno@arch ~/libo_build
+> $ make CPPUNIT_TEST_NAME=testTdf136957 CppunitTest_drawinglayer_processors
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_drawinglayer_processors
+[CUT] drawinglayer_processors
+```
+
+运行完之后并没有在电脑里生成`test-tdf136957`文件，难道测试失败了?
+
+``` c++
+// libo-core/drawinglayer/qa/unit/vclmetafileprocessor2d.cxx
+exportDevice("test-tdf136957", mVclDevice);
+```
+
+加参数`CPPUNITTRACE='gdb --args'`调试一下发现测试是通过的：
+
+``` shellsession
+ysouyno@arch ~/libo_build                                                                 [9:10:30]
+> $ make CPPUNIT_TEST_NAME=testTdf136957 CppunitTest_drawinglayer_processors CPPUNITTRACE='gdb --args'
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_drawinglayer_processors
+[CUT] drawinglayer_processors
+<frozen importlib._bootstrap>:914: ImportWarning: GdbRemoveReadlineFinder.find_spec() not found; falling back to find_module()
+GNU gdb (GDB) 11.1
+Copyright (C) 2021 Free Software Foundation, Inc.
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+Type "show copying" and "show warranty" for details.
+This GDB was configured as "x86_64-pc-linux-gnu".
+Type "show configuration" for configuration details.
+For bug reporting instructions, please see:
+<https://www.gnu.org/software/gdb/bugs/>.
+Find the GDB manual and other documentation resources online at:
+    <http://www.gnu.org/software/gdb/documentation/>.
+
+For help, type "help".
+Type "apropos word" to search for commands related to "word"...
+Reading symbols from /home/ysouyno/libo_build/workdir/LinkTarget/Executable/cppunittester...
+(gdb) start
+Temporary breakpoint 1 at 0x75c1: file /home/ysouyno/gits/libo-core/sal/cppunittester/cppunittester.cxx, line 609.
+...
+...
+...
+[Thread debugging using libthread_db enabled]
+Using host libthread_db library "/usr/lib/libthread_db.so.1".
+
+Temporary breakpoint 1, main (argc=23, argv=0x7fffffff2118) at /home/ysouyno/gits/libo-core/sal/cppunittester/cppunittester.cxx:609
+609 SAL_IMPLEMENT_MAIN()
+(gdb) c
+Continuing.
+[_RUN_____] VclMetaFileProcessor2DTest::testTdf136957
+VclMetaFileProcessor2DTest::testTdf136957 finished in: 69ms
+OK (1)
+[Inferior 1 (process 679271) exited normally]
+(gdb) quit
+```
+
+看了下代码发现有个生成图片的标记默认是关的，将其打开，但此时还是不能生成文件，调试发现有`SIGTRAP`产生，最后才发现要传入全路径才可以：
+
+``` shellsession
+ysouyno@arch ~/libo_build
+> $ make CPPUNIT_TEST_NAME=testTdf136957 CppunitTest_drawinglayer_processors
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_drawinglayer_processors
+[CXX] drawinglayer/qa/unit/vclmetafileprocessor2d.cxx
+[DEP] LNK:CppunitTest/libtest_drawinglayer_processors.so
+[LNK] CppunitTest/libtest_drawinglayer_processors.so
+[CUT] drawinglayer_processors
+
+ysouyno@arch ~/libo_build
+> $ find ~ -name 'test-tdf136957'
+/home/ysouyno/temp/test-tdf136957
+```
+
+另一个`BackendTest.cxx`类似，也要修改代码，测试如下：
+
+``` shellsession
+ysouyno@arch ~/libo_build
+> $ make CPPUNIT_TEST_NAME=testDrawRectWithRectangle CppunitTest_vcl_backend_test
+make -j 8 -rs -f /home/ysouyno/gits/libo-core/Makefile.gbuild CppunitTest_vcl_backend_test
+[CXX] vcl/qa/cppunit/BackendTest.cxx
+[DEP] LNK:CppunitTest/libtest_vcl_backend_test.so
+[LNK] CppunitTest/libtest_vcl_backend_test.so
+[CUT] vcl_backend_test
+
+ysouyno@arch ~/libo_build
+> $ find ~ -name '01-01_rectangle*.png'
+/home/ysouyno/temp/01-01_rectangle_test-rectangle.png
+```
+
+代码对比：
+
+![](files/libo000.png)
