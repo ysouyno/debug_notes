@@ -6,6 +6,8 @@
 - [<2021-09-02 周四> 调试`GM-1.3.35`的竖条纹问题（三）](#2021-09-02-周四-调试gm-1335的竖条纹问题三)
 - [<2021-09-14 周二> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（一）](#2021-09-14-周二-调试gm-1335解析bmp成黑色图片问题一)
 - [<2021-09-15 周三> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（二）](#2021-09-15-周三-调试gm-1335解析bmp成黑色图片问题二)
+- [<2022-07-24 周日> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（一）](#2022-07-24-周日-调试gm-1335读jpeg图片效率低的问题一)
+- [<2022-07-25 周一> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（二）](#2022-07-25-周一-调试gm-1335读jpeg图片效率低的问题二)
 
 <!-- markdown-toc end -->
 
@@ -298,3 +300,236 @@ image->matte=((bmp_info.alpha_mask != 0)
 | RGBT          | 0x54424752    | 16,32          | Raw RGB with a transparency field. Layout is as for BI_RGB at 16 and 32 bits per pixel but the msb in each pixel indicates whether the pixel is transparent or not. |
 | RLE(BI_RLE4)  | 0x34454C52    | 4              | Alias for BI_RLE4                                                                                                                                                   |
 | RLE8(BI_RLE8) | 0x38454C52    | 8              | Alias for BI_RLE8                                                                                                                                                   |
+
+# <2022-07-24 周日> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（一）
+
+调试发现在`coder/jpeg.c:ReadGenericProfile()`函数中调用了`AppendImageProfile()`函数，效率问题正出在此函数中，更具体的是`AppendImaeProfile()`函数中的`GetImageProfile()`函数。
+
+在`GetImageProfile()`函数中会调用`MagickMapAccessEntry()`函数，然后调用`LocaleCompare()`对比`key`是否相等。为什么效率慢？见如下代码片断：
+
+``` c++
+/*
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%                                                                             %
+%                                                                             %
+%                                                                             %
++   M a g i c k M a p A c c e s s E n t r y                                   %
+%                                                                             %
+%                                                                             %
+%                                                                             %
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+%
+%  MagickMapAccessEntry() searches for an object in the map identified
+%  by the specified key. If a matching object is found, then a const
+%  pointer to the object data is returned, and the object_size
+%  argument is updated with the object size. Null is returned if no
+%  matching object is found.
+%
+%  An object is not required to contain a size so object_size may be
+%  updated to zero. If the object size is known to not be required by
+%  this object type, then a null object_size pointer may be passed.
+%
+%  The format of the MagickMapAccessEntry method is:
+%
+%      const void *MagickMapAccessEntry(MagickMap map,const char *key,
+%                                       size_t *object_size)
+%
+%  A description of each parameter follows:
+%
+%    o map: map context
+%
+%    o key: unique key to match
+%
+%    o object_size: Pointer to where object size is to be saved.
+%
+*/
+MagickExport const void *
+MagickMapAccessEntry(MagickMap map,const char *key, size_t *object_size)
+{
+  MagickMapObject
+    *p;
+
+  assert(map != 0);
+  assert(map->signature == MagickSignature);
+  assert(key != 0);
+
+  if (object_size)
+    *object_size=0;
+
+  (void) LockSemaphoreInfo(map->semaphore);
+
+  for (p=map->list; p != 0; p=p->next)
+    if (LocaleCompare(key,p->key) == 0)
+      {
+        if (object_size)
+          *object_size=p->object_size;
+        (void) UnlockSemaphoreInfo(map->semaphore);
+        return(p->object);
+      }
+
+  (void) UnlockSemaphoreInfo(map->semaphore);
+
+  return 0;
+}
+```
+
+我的分析是这样的，`MagickMapAccessEntry()`函数内部首先要在`map`中遍历`key`，得到的`key`（长度为`4`）还要和目标`key`再进行一个字符一个字符的比较，因此效率大打折扣。
+
+# <2022-07-25 周一> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（二）
+
+上面的分析“[<2022-07-24 周日> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（一）](#2022-07-24-周日-调试gm-1335读jpeg图片效率低的问题一)”是错误的，几个循环就能把效率变得这么差？
+
+按照`1.3.38`的思路，我准备自己动手实现一下，首先在内存里开辟一块空间，这里借用`ErrorManager`结构体的空间，然后先保存到这块内存，最后在`ReadJPEGImage()`函数运行时再将它全部存到`image`中，所以我的代码有：
+
+``` c++
+typedef struct _ErrorManager
+{
+  Image
+    *image;
+
+  MagickBool
+    ping;
+
+  MagickBool
+    completed;
+
+  jmp_buf
+    error_recovery;
+
+  unsigned int
+    max_warning_count;
+
+  magick_uint16_t
+    warning_counts[JMSG_LASTMSGCODE];
+
+  int
+    max_scan_number;
+
+  ProfileInfo
+    *profiles;
+
+  int
+    profiles_len;
+
+  unsigned char
+    buffer[65537+200];
+
+} ErrorManager;
+```
+
+``` c++
+boolean append_profile_to_error_manager(ErrorManager *em, const char *name,
+                                        const unsigned char *profile_data,
+                                        const size_t data_len) {
+  int i = 0;
+
+  // if `name` found, append data
+  for (i = 0; i < em->profiles_len; ++i) {
+    ProfileInfo *p = &em->profiles[i];
+    if (!p->name)
+      break;
+
+    if (0 == strcmp(p->name, name)) {
+      int new_len = p->length + data_len;
+      MagickReallocMemory(unsigned char *, p->info, new_len);
+      if (p->info) {
+        memcpy(p->info + p->length, profile_data, data_len);
+        p->length = new_len;
+        return True;
+      }
+    }
+  }
+
+  // if `name` not found, add data
+  for (i = 0; i < em->profiles_len; ++i) {
+    ProfileInfo *p = &em->profiles[i];
+    if (p->name)
+      continue;
+
+    p->name = AcquireString(name);
+    MagickReallocMemory(unsigned char *, p->info, data_len);
+    if (!p->info) {
+      MagickFreeMemory(p->name);
+      MagickFreeMemory(p->info);
+      break;
+    }
+
+    memcpy(p->info, profile_data, data_len);
+    p->length = data_len;
+    return True;
+  }
+
+  return False;
+}
+
+void init_error_manager_profiles(ErrorManager *em) {
+  if (!em)
+    return;
+
+  em->profiles_len = 16;
+  MagickReallocMemory(ProfileInfo *, em->profiles,
+                      em->profiles_len * sizeof(ProfileInfo));
+  memset(em->profiles, 0, em->profiles_len * sizeof(ProfileInfo));
+}
+
+void free_error_manager_profiles(ErrorManager *em) {
+  int i = 0;
+
+  if (!em)
+    return;
+
+  for (i = 0; i < em->profiles_len; ++i) {
+    ProfileInfo *p = &em->profiles[i];
+    MagickFreeMemory(p->name);
+    MagickFreeMemory(p->info);
+  }
+
+  MagickFreeMemory(em->profiles);
+}
+```
+
+然后在`ReadGenericProfile()`函数中替换`AppendImageProfile()`
+
+``` c++
+/*
+  Store profile in Image.
+*/
+/* (void) AppendImageProfile(image,profile_name,profile+header_length, */
+/*                           length-header_length); */
+append_profile_to_error_manager(error_manager,
+                                profile_name,
+                                profile+header_length,
+                                length-header_length);
+```
+
+最后`init_error_manager_profiles()`和`free_error_manager_profiles()`函数放到`ReadJPEGImage()`函数中调用即可，代码不贴了。测试一下效果发现性能提高了大概将近一半。但是处理时间仍然在二十秒左右，这个时间还是太长。
+
+所以我又研究了一下，发现性能的损失是由于`realloc()`函数被频繁调用导致内存的频繁拷贝，那为什么同样的思路`1.3.38`却没有这个问题呢？它的整个处理时间只有一两秒，这是为什么？
+
+最后发现是在申请内存时`1.3.38`中为了减少`realloc()`的调用次数，使用了：
+
+``` c++
+/*
+  Compute a value which is the next kilobyte power of 2 larger than
+  the requested value or 256 whichever is larger.
+
+  The objective is to round up the size quickly (and in repeatable
+  steps) in order to reduce the number of memory copies due to realloc
+  for strings which grow rapidly, while producing a reasonable size
+  for smaller strings.
+*/
+#define MagickRoundUpStringLength(size)                                 \
+  do {                                                                  \
+    size_t                                                              \
+      _rounded,                                                         \
+      _target;                                                          \
+                                                                        \
+    _target=(Max(size,256));                                            \
+    for (_rounded=256U; _rounded < _target; _rounded *= 2);             \
+    size=_rounded;                                                      \
+} while(0)
+```
+
+同时需要配合`magick/memory.c`的`_MagickReallocateResourceLimitedMemory()`函数，需要记录各内存长度变量等等，如果将`_MagickReallocateResourceLimitedMemory()`中的`MagickRoundUpStringLength()`注释掉，则时间也变成了和`1.3.35`一样，变成三十几秒。
+
+看来什么东西都要自己亲手尝试一下才能有所体会。
