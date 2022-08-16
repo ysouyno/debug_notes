@@ -6,6 +6,7 @@
 - [<2021-12-15 Wed> 调试`libo-7.3`的`emf`流程（三）](#2021-12-15-wed-调试libo-73的emf流程三)
     - [如何使用`libo`的`cppunit`来调试](#如何使用libo的cppunit来调试)
 - [<2021-12-16 Thu> 调试`libo-7.3`的`emf`流程（四）](#2021-12-16-thu-调试libo-73的emf流程四)
+- [<2022-08-16 周二> 调试`libo`的图片绘制流程（一）](#2022-08-16-周二-调试libo的图片绘制流程一)
 
 <!-- markdown-toc end -->
 
@@ -513,3 +514,68 @@ void MetaAction::Scale( double, double )
 {
 }
 ```
+
+# <2022-08-16 周二> 调试`libo`的图片绘制流程（一）
+
+| PLATFORM | COMMIT/BRANCH                            | BUILD TIME |
+| :-:      | :-:                                      |        :-: |
+| WINDOWS  | a56705efdbe9ceb0f5bb92d1d8bb2cefbc03f3ac | 2022-08-11 |
+| LINUX    |                                          | 2022-08-15 |
+
+依然用我那最常用的的`bg1a.jpg`进行测试，这篇笔记在`windows`平台下写的，环境为`vs2022`。
+
+因为测试图片是`jpg`图片，所以直接搜索`jpeg_read_header()`函数并下断，可以得到读图的代码流程，但是感觉没有什么用，如此操作依然找不到绘制的代码。
+
+从`CUT`入手（`CppunitTest`），这里使用`linux`环境，因为`windows`下不知道如何调试`CppunitTest`，搞了好几天再加电脑也慢，故此不得已和`linux`配合调试以提高效率。
+
+``` shellsession
+$ cd ~/libo_build
+$ make CppunitTest_vcl_bitmap_render_test CPPUNIT_TEST_NAME=testDrawAlphaBitmapEx CPPUNITTRACE='gdb --args'
+```
+
+调试发现在`linux`平台上，会经过`vcl/inc/salgdi.hxx`的`drawAlphaBitmap()`函数进行动态调用。这里对于理解整个结构有帮助。
+
+据我的了解，不管是`jpg`还是`png`图片，最终在`libo`中都会被`BitmapEx`类或者`Bitmap`类所管理，所以搜索所有`salbmp.cxx`文件会发现：
+
+``` shellsession
+$ find . -name 'salbmp.cxx'
+./vcl/quartz/salbmp.cxx
+./vcl/skia/salbmp.cxx
+./vcl/source/bitmap/salbmp.cxx
+./vcl/unx/generic/gdi/salbmp.cxx
+./vcl/win/gdi/salbmp.cxx
+```
+
+在`linux`下它调用的是居然是`cairo`，但是环境不一样，调用流程不一样的。在`windows`下调用的是`SkiaSalGraphicsImpl::drawTransformedBitmap()`函数。
+
+值得注意的是，在内存中还有一个缓存居然，见`SkiaSalGraphicsImpl::mergeCacheBitmaps()`函数的：
+
+``` c++
+// vcl/skia/gdiimpl.cxx
+
+// Try to find a cached result, this time after possible delayed scaling.
+OString key = makeCachedImageKey(bitmap, alphaBitmap, targetSize, bitmapType, alphaBitmapType);
+if (sk_sp<SkImage> image = findCachedImage(key))
+{
+    assert(imageSize(image) == targetSize);
+    return image;
+}
+```
+
+``` c++
+// vcl/skia/SkiaHelper.cxx
+
+// LRU cache, last item is the least recently used. Hopefully there won't be that many items
+// to require a hash/map. Using o3tl::lru_map would be simpler, but it doesn't support
+// calculating cost of each item.
+static std::list<ImageCacheItem> imageCache;
+```
+
+`SkiaSalGraphicsImpl::drawTransformedBitmap()`有处`log`非常有用：
+
+``` c++
+SAL_INFO("vcl.skia.trace", "drawtransformedbitmap(" << this << "): " << rSourceBitmap.GetSize()
+                                                    << " " << rNull << ":" << rX << ":" << rY);
+```
+
+可以设置`SAL_LOG`变量的值为：`set SAL_LOG=+INFO.vcl.skia.trace`。
