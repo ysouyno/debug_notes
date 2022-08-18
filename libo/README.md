@@ -515,12 +515,21 @@ void MetaAction::Scale( double, double )
 }
 ```
 
+之所以是`MetaAction::Scale`是空实现，是因为它是一个基类，具体操作由它的派生类来实现，比如：
+
+``` c++
+class VCL_DLLPUBLIC MetaPointAction final : public MetaAction
+{}
+```
+
 # <2022-08-16 周二> 调试`libo`的图片绘制流程（一）
 
 | PLATFORM | COMMIT/BRANCH                            | BUILD TIME |
 | :-:      | :-:                                      |        :-: |
 | WINDOWS  | a56705efdbe9ceb0f5bb92d1d8bb2cefbc03f3ac | 2022-08-11 |
-| LINUX    |                                          | 2022-08-15 |
+| LINUX    | 6c81a09e3ef239a2d7a991d00fe3620a67298b99 | 2022-08-15 |
+
+在`linux`上编译后要注意不要随便更新系统，比如我更新了系统`sudo pacman -Syu`后，导致`soffice.bin`不能运行，提示缺少`libgsasl.so.7`，所以我不得不再花三个小时重新编译`libo`。
 
 依然用我那最常用的的`bg1a.jpg`进行测试，这篇笔记在`windows`平台下写的，环境为`vs2022`。
 
