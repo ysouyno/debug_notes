@@ -8,6 +8,7 @@
 - [<2021-12-16 Thu> 调试`libo-7.3`的`emf`流程（四）](#2021-12-16-thu-调试libo-73的emf流程四)
 - [<2022-08-16 周二> 调试`libo`的图片绘制流程（一）](#2022-08-16-周二-调试libo的图片绘制流程一)
 - [<2022-08-19 Fri> 调试`libo`的图片绘制流程（二）](#2022-08-19-fri-调试libo的图片绘制流程二)
+- [<2022-08-23 Tue> 调试`libo`的图片绘制流程（三）](#2022-08-23-tue-调试libo的图片绘制流程三)
 
 <!-- markdown-toc end -->
 
@@ -616,27 +617,50 @@ info:vcl.gdi:7689:7689:vcl/source/bitmap/BitmapScaleSuperFilter.cxx:1014: All th
 
 从堆栈看，依然调用的是`OutputDevice::DrawTransformedBitmapEx()`，与`windows`同：
 
-``` text
-libvcllo.so!BitmapScaleSuperFilter::execute(const BitmapScaleSuperFilter * const this, const BitmapEx & rBitmap) (/home/ysouyno/gits/libo-core/vcl/source/bitmap/BitmapScaleSuperFilter.cxx:1014)
-libvcllo.so!BitmapFilter::Filter(BitmapEx & rBmpEx, const BitmapFilter & rFilter) (/home/ysouyno/gits/libo-core/vcl/source/bitmap/bitmapfilter.cxx:22)
-libvcllo.so!Bitmap::Scale(Bitmap * const this, const double & rScaleX, const double & rScaleY, BmpScaleFlag nScaleFlag) (/home/ysouyno/gits/libo-core/vcl/source/bitmap/bitmap.cxx:1368)
-libvcllo.so!OutputDevice::DrawBitmap(OutputDevice * const this, const Point & rDestPt, const Size & rDestSize, const Point & rSrcPtPixel, const Size & rSrcSizePixel, const Bitmap & rBitmap, const MetaActionType nAction) (/home/ysouyno/gits/libo-core/vcl/source/outdev/bitmap.cxx:163)
-libvcllo.so!OutputDevice::DrawBitmap(OutputDevice * const this, const Point & rDestPt, const Size & rDestSize, const Bitmap & rBitmap) (/home/ysouyno/gits/libo-core/vcl/source/outdev/bitmap.cxx:49)
-libvcllo.so!OutputDevice::DrawBitmapEx(OutputDevice * const this, const Point & rDestPt, const Size & rDestSize, const BitmapEx & rBitmapEx) (/home/ysouyno/gits/libo-core/vcl/source/outdev/bitmapex.cxx:62)
-libvcllo.so!OutputDevice::DrawTransformedBitmapEx(OutputDevice * const this, const basegfx::B2DHomMatrix & rTransformation, const BitmapEx & rBitmapEx, double fAlpha) (/home/ysouyno/gits/libo-core/vcl/source/outdev/bitmapex.cxx:558)
-libdrawinglayerlo.so!drawinglayer::processor2d::VclProcessor2D::RenderBitmapPrimitive2D(drawinglayer::processor2d::VclProcessor2D * const this, const drawinglayer::primitive2d::BitmapPrimitive2D & rBitmapCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/vclprocessor2d.cxx:405)
-libdrawinglayerlo.so!drawinglayer::processor2d::VclPixelProcessor2D::processBitmapPrimitive2D(drawinglayer::processor2d::VclPixelProcessor2D * const this, const drawinglayer::primitive2d::BitmapPrimitive2D & rBitmapCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/vclpixelprocessor2d.cxx:535)
-libdrawinglayerlo.so!drawinglayer::processor2d::VclPixelProcessor2D::processBasePrimitive2D(drawinglayer::processor2d::VclPixelProcessor2D * const this, const drawinglayer::primitive2d::BasePrimitive2D & rCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/vclpixelprocessor2d.cxx:257)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::process(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::Primitive2DContainer & rSource) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:68)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::visit(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::Primitive2DContainer & rContainer) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:56)
-libdrawinglayercorelo.so!drawinglayer::primitive2d::BufferedDecompositionPrimitive2D::get2DDecomposition(const drawinglayer::primitive2d::BufferedDecompositionPrimitive2D * const this, drawinglayer::primitive2d::Primitive2DDecompositionVisitor & rVisitor, const drawinglayer::geometry::ViewInformation2D & rViewInformation) (/home/ysouyno/gits/libo-core/drawinglayer/source/primitive2d/BufferedDecompositionPrimitive2D.cxx:41)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::process(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::BasePrimitive2D & rCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:46)
-libdrawinglayerlo.so!drawinglayer::processor2d::VclPixelProcessor2D::processBasePrimitive2D(drawinglayer::processor2d::VclPixelProcessor2D * const this, const drawinglayer::primitive2d::BasePrimitive2D & rCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/vclpixelprocessor2d.cxx:445)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::process(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::Primitive2DContainer & rSource) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:68)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::visit(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::Primitive2DContainer & rContainer) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:56)
-libdrawinglayercorelo.so!drawinglayer::primitive2d::BufferedDecompositionPrimitive2D::get2DDecomposition(const drawinglayer::primitive2d::BufferedDecompositionPrimitive2D * const this, drawinglayer::primitive2d::Primitive2DDecompositionVisitor & rVisitor, const drawinglayer::geometry::ViewInformation2D & rViewInformation) (/home/ysouyno/gits/libo-core/drawinglayer/source/primitive2d/BufferedDecompositionPrimitive2D.cxx:41)
-libdrawinglayerlo.so!drawinglayer::processor2d::BaseProcessor2D::process(drawinglayer::processor2d::BaseProcessor2D * const this, const drawinglayer::primitive2d::BasePrimitive2D & rCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/baseprocessor2d.cxx:46)
-libdrawinglayerlo.so!drawinglayer::processor2d::VclPixelProcessor2D::processBasePrimitive2D(drawinglayer::processor2d::VclPixelProcessor2D * const this, const drawinglayer::primitive2d::BasePrimitive2D & rCandidate) (/home/ysouyno/gits/libo-core/drawinglayer/source/processor2d/vclpixelprocessor2d.cxx:445)
+到这里的话，我这篇笔记的任务也算完成了，下面还要继续跟踪`linux`的流程，看看有没有什么心得！
+
+# <2022-08-23 Tue> 调试`libo`的图片绘制流程（三）
+
+昨天晚上加班又调试了一下`libo`在`linux`下的图片流程，大体的收获是（依然是`bg1a.jpg`这些图片）：
+
+花了半天时间了解了一下`graphviz`的`dot`，这样以后画函数调用图时会方便一些，这是我的处女作：
+
+``` graphviz-(dot)
+digraph G {
+    a -> b -> c -> d -> e -> f -> g -> h -> i;
+
+    a [label="VclProcessor2D::RenderBitmapPrimitive2D()"];
+    b [label="OutputDevice::DrawTransformedBitmapEx()"];
+    c [label="OutputDevice::DrawBitmapEx()"];
+    d [label="OutputDevice::DrawBitmap()"];
+    e [label="SalGraphics::DrawBitmap()"];
+    f [label="SalGraphicsAutoDelegateToImpl::drawBitmap()"];
+    g [label="SvpGraphicsBackend::drawBitmap()"];
+    h [label="CairoCommon::copyWithOperator()"];
+    i [label="renderWithOperator()"];
+}
 ```
 
-到这里的话，我这篇笔记的任务也算完成了，下面还要继续跟踪`linux`的流程，看看有没有什么心得！
+![](files/libo_20220823_00.png)
+
+一直跟踪到`SvpGraphicsBackend::drawBitmap()`函数，并将这里的这行代码注释掉，则插入的图片将会显示空白，说明在`linux`下这就是关键代码：
+
+``` c++
+m_rCairoCommon.copyWithOperator(rPosAry, source, CAIRO_OPERATOR_SOURCE, getAntiAlias());
+```
+
+继续向下走就进到了`cairo`的代码中了，一路回退，到`Application::Execute()`中下断，`F5`两三次后界面上就会刷出刚刚插入的`bg1a.jpg`图片，刷出的核心代码居然是在：
+
+``` c++
+// libo-core/vcl/unx/gtk3/gtkdata.cxx
+// GtkSalData::Yield()
+
+while( nMaxEvents-- && wasOneEvent )
+{
+    wasOneEvent = g_main_context_iteration( nullptr, bWait && !bWasEvent );
+    if( wasOneEvent )
+        bWasEvent = true;
+}
+```
+
+`g_main_context_iteration()`这行中。

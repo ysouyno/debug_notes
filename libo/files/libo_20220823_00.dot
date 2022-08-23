@@ -1,0 +1,13 @@
+digraph G {
+    a -> b -> c -> d -> e -> f -> g -> h -> i;
+
+    a [label="VclProcessor2D::RenderBitmapPrimitive2D()"];
+    b [label="OutputDevice::DrawTransformedBitmapEx()"];
+    c [label="OutputDevice::DrawBitmapEx()"];
+    d [label="OutputDevice::DrawBitmap()"];
+    e [label="SalGraphics::DrawBitmap()"];
+    f [label="SalGraphicsAutoDelegateToImpl::drawBitmap()"];
+    g [label="SvpGraphicsBackend::drawBitmap()"];
+    h [label="CairoCommon::copyWithOperator()"];
+    i [label="renderWithOperator()"];
+}
