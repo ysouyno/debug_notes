@@ -1,0 +1,62 @@
+digraph G {
+  subgraph cluster0 {
+    node [style = filled, color = white];
+    style = filled;
+    color = lightgrey;
+    c0 -> d0 -> e0 -> f0 -> g0 -> h0 -> i0;
+    label = "linux";
+  }
+
+  subgraph cluster1 {
+    node [style = filled];
+    c1 -> d1 -> e1 -> f1 -> g1;
+    label = "windows";
+    color = blue;
+  }
+
+  subgraph cluster2 {
+    node [style = filled, color = white];
+    style = filled;
+    color = lightgrey;
+    m0;
+    label = "linux";
+  }
+
+  subgraph cluster3 {
+    node [style = filled];
+    m1 -> n1;
+    label = "windows";
+    color = blue;
+  }
+
+  a -> b;
+  b -> c0;
+  b -> c1;
+
+  i0 -> j;
+  g1 -> j;
+  j -> k -> l;
+  l -> m0;
+  l -> m1;
+
+  a [label = "VclProcessor2D::RenderBitmapPrimitive2D"];
+  b [label = "OutputDevice::DrawTransformedBitmapEx"];
+  c0 [label = "OutputDevice::DrawBitmapEx"];
+  c1 [label = "OutputDevice::DrawTransformBitmapExDirect"];
+  d0 [label = "OutputDevice::DrawBitmap"];
+  d1 [label = "SalGraphics::DrawTransformedBitmap"];
+  e0 [label = "SalGraphics::DrawBitmap"];
+  e1 [label = "WinSalGraphics::drawTransformedBitmap"]
+  f0 [label = "SalGraphicsAutoDelegateToImpl::drawBitmap"];
+  f1 [label = "SkiaSalGraphicsImpl::drawTransformedBitmap"];
+  g0 [label = "SvpGraphicsBackend::drawBitmap"];
+  g1 [label = "SkCanvas::drawImageRect"];
+  h0 [label = "CairoCommon::copyWithOperator"];
+  i0 [label = "renderWithOperator"];
+  j [label = "Application::Execute"];
+  k [label = "Application::Yield"];
+  l [label = "svapp.cxx::ImplYield"];
+  m0 [label = "GtkInstance::DoYield"];
+  m1 [label = "WinSalInstance::DoYield"];
+  n1 [label = "salinst.cxx::ImplSalYield"];
+}
