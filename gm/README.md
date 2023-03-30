@@ -8,6 +8,7 @@
 - [<2021-09-15 周三> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（二）](#2021-09-15-周三-调试gm-1335解析bmp成黑色图片问题二)
 - [<2022-07-24 周日> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（一）](#2022-07-24-周日-调试gm-1335读jpeg图片效率低的问题一)
 - [<2022-07-25 周一> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（二）](#2022-07-25-周一-调试gm-1335读jpeg图片效率低的问题二)
+- [<2023-03-30 周四> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（三）](#2023-03-30-周四-调试gm-1335解析bmp成黑色图片问题三)
 
 <!-- markdown-toc end -->
 
@@ -533,3 +534,53 @@ append_profile_to_error_manager(error_manager,
 同时需要配合`magick/memory.c`的`_MagickReallocateResourceLimitedMemory()`函数，需要记录各内存长度变量等等，如果将`_MagickReallocateResourceLimitedMemory()`中的`MagickRoundUpStringLength()`注释掉，则时间也变成了和`1.3.35`一样，变成三十几秒。
 
 看来什么东西都要自己亲手尝试一下才能有所体会。
+
+# <2023-03-30 周四> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（三）
+
+这里的问题与前面分析的“[<2021-09-14 周二> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（一）](#2021-09-14-周二-调试gm-1335解析bmp成黑色图片问题一)”不是同一个问题，但是有相似之处。
+
+文档中共有`260`张`png`图片，我仅选择了第`179.png`：
+
+![](files/90424_179.png)
+
+虽然是`png`图片后缀，但其实是一个`bmp`图片，经过调查发现有如下现象：
+
+1. 每次打开文档都有二至五张图片显示为黑色（大概率是那几张，但同一图片不是每次都是黑色）。
+2. 黑色图片有两种情况：全黑或者半黑（仅上半部黑色，下半部正常）。
+3. 使用`Debug`版本，不能重现；`Release`版本必重现。
+4. `XP`下运行两次均未重现。
+5. 将`scale`函数替换为如`zoom`，`sample`，`thumbnail`均未重现。
+6. 调用`scale`前设置`matte(true)`，不能重现。
+
+黑色图片问题以后遇到就应该多想想用的这个`scale`函数，因为在文章（一）（二）中已经提过：
+
+``` c++
+if (p->opacity == TransparentOpacity)
+  {
+    x_vector[x].red=0.0;
+    x_vector[x].green=0.0;
+    x_vector[x].blue=0.0;
+  }
+else
+  {
+    x_vector[x].red=p->red;
+    x_vector[x].green=p->green;
+    x_vector[x].blue=p->blue;
+  }
+```
+
+将两个分支的代码整成一样，黑色图片问题就解决了。但是这么处理肯定不行，太暴力！
+
+想到第`5`点中提到如果将`matte(true)`设置一下（因为图片的`matte`原值是`false`）也不能重现，所以是不是将判断`bmp`是否有透明通道的方法再优化一下，让读图时检测`matte`为`true`，是不是就可以不用暴力修改上面的代码了？
+
+这是修改开源库的处理思路，但更改开源代码带来的编译工作较多，特别是最近还新增了对`x64`的支持，所以这是下策。
+
+再研究发现可能和`orphan_img.replaceImage(p);`这行代码有关。将`orphan_img`由`Magick::Image`改为用指针类型`Magick::Image *`，去掉对`replaceImage`函数的调用，好像也不重现了。接下来需要研究下`replaceImage`函数，看看到底发生了什么？
+
+目前总结来说有如下方法可以修复（包括不靠谱的）：
+
+1. 所有`TransparentOpacity`分支中，如`x_vector[x].red=0.0;`改为`x_vector[x].red=p->red;`。
+2. `bmp.c:984`处的`matte`的值撤消之前的修改。
+3. `orphan_img`由`Magick::Image`改为用指针类型`Magick::Image *`。
+4. 替换`scale`为`zoom`或者`thumbnail`。
+5. 调用`scale`前设置`matte(true)`。
