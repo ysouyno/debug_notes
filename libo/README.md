@@ -10,6 +10,7 @@
 - [<2022-08-19 Fri> 调试`libo`的图片绘制流程（二）](#2022-08-19-fri-调试libo的图片绘制流程二)
 - [<2022-08-23 Tue> 调试`libo`的图片绘制流程（三）](#2022-08-23-tue-调试libo的图片绘制流程三)
 - [<2022-08-23 周二> 调试`libo`的图片绘制流程（四）](#2022-08-23-周二-调试libo的图片绘制流程四)
+- [<2023-09-23 周六> 调试`libo`如果向`windows`剪贴板设置`CF_ENHMETAFILE`数据](#2023-09-23-周六-调试libo如果向windows剪贴板设置cf_enhmetafile数据)
 
 <!-- markdown-toc end -->
 
@@ -671,3 +672,82 @@ while( nMaxEvents-- && wasOneEvent )
 紧接着我又在`windows`上也调试了一把，对比一下`linux`上的流程有何不同，下面是我用`dot`写的流程图（小有感觉）：
 
 ![](files/libo_20220823_01.png)
+
+# <2023-09-23 周六> 调试`libo`如果向`windows`剪贴板设置`CF_ENHMETAFILE`数据
+
+| PLATFORM | COMMIT/BRANCH                            | BUILD TIME |
+| :-:      | :-:                                      | :-:        |
+| WINDOWS  | 7f69bca41c5034207ba9170420f6b3b214121a7b | 2023-09-22 |
+
+一些有用的信息：
+
+`C-c`复制时断点下在：
+
+``` c++
+// cellsh1.cxx:1366
+
+case SID_COPY:              // for graphs in DrawShell
+    {
+        weld::WaitObject aWait( GetViewData().GetDialogParent() );
+        pTabViewShell->CopyToClip( nullptr, false, false, true );
+        rReq.Done();
+        GetViewData().SetPasteMode( ScPasteFlags::Mode | ScPasteFlags::Border );
+        pTabViewShell->ShowCursor();
+        pTabViewShell->UpdateCopySourceOverlay();
+    }
+    break;
+```
+
+1. `libo`上没有用`OpenClipboard`，`SetClipboardData`这样的剪贴板函数，它用的是`OleSetClipboard`。
+2. `libo`并不是一次性将所有数据都设置进系统剪贴板，而是在需要时再获取。
+
+我打开`CLCL.exe`这个工具，点击左侧的`ENHANCED METAFILE`，这里断下：
+
+``` c++
+// XNotifyingDataObject.cxx:85
+
+STDMETHODIMP CXNotifyingDataObject::GetData( FORMATETC * pFormatetc, STGMEDIUM * pmedium )
+{
+    return m_aIDataObject->GetData(pFormatetc, pmedium);
+}
+```
+
+然后在`transfer.cxx:321`处`GetData`处获取内容，它是通过`transobj.cxx:437`处的`bOK = SetGDIMetaFile( aMtf );`向`aMtf`中设置数据的，但是这里返回时`maAny`还不是最终的`emf`图元文件的二进制序列，需要经过下面的转化才可以，此时`maAny`中的数据是以`VCLMTF`开头的，这是一个关键字，在`libo`源码里搜索它可以得到一些有用的信息：
+
+``` c++
+// transfer.cxx:321
+
+else if( SotExchange::GetFormatDataFlavor( SotClipboardFormatId::EMF, aSubstFlavor ) &&
+         TransferableDataHelper::IsEqual( aSubstFlavor, rFlavor ) &&
+         SotExchange::GetFormatDataFlavor( SotClipboardFormatId::GDIMETAFILE, aSubstFlavor ) )
+{
+    GetData(aSubstFlavor, rDestDoc);
+
+    if( maAny.hasValue() )
+    {
+        Sequence< sal_Int8 > aSeq;
+
+        if( maAny >>= aSeq )
+        {
+            GDIMetaFile     aMtf;
+            {
+                SvMemoryStream aSrcStm( aSeq.getArray(), aSeq.getLength(), StreamMode::WRITE | StreamMode::TRUNC );
+                SvmReader aReader( aSrcStm );
+                aReader.Read( aMtf );
+            }
+
+            Graphic         aGraphic( aMtf );
+            SvMemoryStream  aDstStm( 65535, 65535 );
+
+            if( GraphicConverter::Export( aDstStm, aGraphic, ConvertDataFormat::EMF ) == ERRCODE_NONE )
+            {
+                maAny <<= Sequence< sal_Int8 >( static_cast< const sal_Int8* >( aDstStm.GetData() ),
+                                                aDstStm.TellEnd() );
+                bDone = true;
+            }
+        }
+    }
+}
+```
+
+即这里函数`GraphicConverter::Export()`将转化为最终的`emf`数据。
