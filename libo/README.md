@@ -11,6 +11,7 @@
 - [<2022-08-23 Tue> 调试`libo`的图片绘制流程（三）](#2022-08-23-tue-调试libo的图片绘制流程三)
 - [<2022-08-23 周二> 调试`libo`的图片绘制流程（四）](#2022-08-23-周二-调试libo的图片绘制流程四)
 - [<2023-09-23 周六> 调试`libo`如果向`windows`剪贴板设置`CF_ENHMETAFILE`数据](#2023-09-23-周六-调试libo如果向windows剪贴板设置cf_enhmetafile数据)
+- [<2023-09-24 周日> 调试`libo`如何转化为`EMF`数据](#2023-09-24-周日-调试libo如何转化为emf数据)
 
 <!-- markdown-toc end -->
 
@@ -751,3 +752,95 @@ else if( SotExchange::GetFormatDataFlavor( SotClipboardFormatId::EMF, aSubstFlav
 ```
 
 即这里函数`GraphicConverter::Export()`将转化为最终的`emf`数据。
+
+# <2023-09-24 周日> 调试`libo`如何转化为`EMF`数据
+
+续上篇，在`GraphicConverter::Export()`函数中最终生成了`emf`数据，进一步跟踪发现实际的转化函数在这里（隐藏的很深）：
+
+``` c++
+// graphicfilter.cxx:1830
+IMPL_LINK( GraphicFilter, FilterCallback, ConvertData&, rData, bool )
+{
+    bool bRet = false;
+
+    sal_uInt16      nFormat = GRFILTER_FORMAT_DONTKNOW;
+    OUString aShortName;
+    css::uno::Sequence< css::beans::PropertyValue > aFilterData;
+    switch( rData.mnFormat )
+    {
+        case ConvertDataFormat::BMP: aShortName = BMP_SHORTNAME; break;
+        case ConvertDataFormat::GIF: aShortName = GIF_SHORTNAME; break;
+        case ConvertDataFormat::JPG: aShortName = JPG_SHORTNAME; break;
+        case ConvertDataFormat::MET: aShortName = MET_SHORTNAME; break;
+        case ConvertDataFormat::PCT: aShortName = PCT_SHORTNAME; break;
+        case ConvertDataFormat::PNG: aShortName = PNG_SHORTNAME; break;
+        case ConvertDataFormat::SVM: aShortName = SVM_SHORTNAME; break;
+        case ConvertDataFormat::TIF: aShortName = TIF_SHORTNAME; break;
+        case ConvertDataFormat::WMF: aShortName = WMF_SHORTNAME; break;
+        case ConvertDataFormat::EMF: aShortName = EMF_SHORTNAME; break;
+        case ConvertDataFormat::SVG: aShortName = SVG_SHORTNAME; break;
+        case ConvertDataFormat::WEBP: aShortName = WEBP_SHORTNAME; break;
+
+        default:
+        break;
+    }
+    if( GraphicType::NONE == rData.maGraphic.GetType() || rData.maGraphic.GetReaderContext() ) // Import
+    {
+        // Import
+        nFormat = GetImportFormatNumberForShortName( aShortName );
+        bRet = ImportGraphic( rData.maGraphic, u"", rData.mrStm, nFormat ) == ERRCODE_NONE;
+    }
+    else if( !aShortName.isEmpty() )
+    {
+        // Export
+#if defined(IOS) || defined(ANDROID)
+        if (aShortName == PNG_SHORTNAME)
+        {
+            aFilterData.realloc(aFilterData.getLength() + 1);
+            auto pFilterData = aFilterData.getArray();
+            pFilterData[aFilterData.getLength() - 1].Name = "Compression";
+            // We "know" that this gets passed to zlib's deflateInit2_(). 1 means best speed.
+            pFilterData[aFilterData.getLength() - 1].Value <<= static_cast<sal_Int32>(1);
+        }
+#endif
+        nFormat = GetExportFormatNumberForShortName( aShortName );
+        bRet = ExportGraphic( rData.maGraphic, u"", rData.mrStm, nFormat, &aFilterData ) == ERRCODE_NONE;
+    }
+
+    return bRet;
+}
+```
+
+最终在`GraphicFilter::ExportGraphic()`中的`ConvertGDIMetaFileToEMF()`完成转化：
+
+``` c++
+// graphicfilter.cxx:1667
+
+if (!bDone)
+{
+    // #i119735# just use GetGDIMetaFile, it will create a buffered version of contained bitmap now automatically
+    if (!ConvertGDIMetaFileToEMF(aGraphic.GetGDIMetaFile(), *rTempStm))
+        nStatus = ERRCODE_GRFILTER_FORMATERROR;
+
+    if (rTempStm->GetError())
+        nStatus = ERRCODE_GRFILTER_IOERROR;
+}
+
+// wmf.cxx:111
+
+bool ConvertGDIMetaFileToEMF(const GDIMetaFile & rMTF, SvStream & rTargetStream)
+{
+    EMFWriter aEMFWriter(rTargetStream);
+    GDIMetaFile aGdiMetaFile(rMTF);
+
+    if(usesClipActions(aGdiMetaFile))
+    {
+        // #i121267# It is necessary to prepare the metafile since the export does *not* support
+        // clip regions. This tooling method clips the geometry content of the metafile internally
+        // against its own clip regions, so that the export is safe to ignore clip regions
+        clipMetafileContentAgainstOwnRegions(aGdiMetaFile);
+    }
+
+    return aEMFWriter.WriteEMF(aGdiMetaFile);
+}
+```
