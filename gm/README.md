@@ -9,6 +9,7 @@
 - [<2022-07-24 周日> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（一）](#2022-07-24-周日-调试gm-1335读jpeg图片效率低的问题一)
 - [<2022-07-25 周一> 调试`GM-1.3.35`读`jpeg`图片效率低的问题（二）](#2022-07-25-周一-调试gm-1335读jpeg图片效率低的问题二)
 - [<2023-03-30 周四> 调试`GM-1.3.35`解析`bmp`成黑色图片问题（三）](#2023-03-30-周四-调试gm-1335解析bmp成黑色图片问题三)
+- [<2024-08-30 周五> 调试`GM-1.3.35`单例模式下如何正确析构](#2024-08-30-周五-调试gm-1335单例模式下如何正确析构)
 
 <!-- markdown-toc end -->
 
@@ -584,3 +585,171 @@ else
 3. `orphan_img`由`Magick::Image`改为用指针类型`Magick::Image *`。
 4. 替换`scale`为`zoom`或者`thumbnail`。
 5. 调用`scale`前设置`matte(true)`。
+
+# <2024-08-30 周五> 调试`GM-1.3.35`单例模式下如何正确析构
+
+花了一周多时间，终于找到原因了！我用我的测试工程来模拟一下`EImage`中的情况：
+
+``` c++
+#include <Windows.h>
+#include <iostream>
+#include <Magick++.h>
+
+#if _DEBUG
+#pragma comment(lib, "CORE_DB_bzlib_.lib")
+#pragma comment(lib, "CORE_DB_coders_.lib")
+#pragma comment(lib, "CORE_DB_filters_.lib")
+#pragma comment(lib, "CORE_DB_jbig_.lib")
+#pragma comment(lib, "CORE_DB_jp2_.lib")
+#pragma comment(lib, "CORE_DB_jpeg_.lib")
+#pragma comment(lib, "CORE_DB_lcms_.lib")
+#pragma comment(lib, "CORE_DB_libxml_.lib")
+#pragma comment(lib, "CORE_DB_Magick++_.lib")
+#pragma comment(lib, "CORE_DB_magick_.lib")
+#pragma comment(lib, "CORE_DB_png_.lib")
+#pragma comment(lib, "CORE_DB_tiff_.lib")
+#pragma comment(lib, "CORE_DB_ttf_.lib")
+#pragma comment(lib, "CORE_DB_wand_.lib")
+#pragma comment(lib, "CORE_DB_webp_.lib")
+#pragma comment(lib, "CORE_DB_wmf_.lib")
+#pragma comment(lib, "CORE_DB_xlib_.lib")
+#pragma comment(lib, "CORE_DB_zlib_.lib")
+#pragma comment(lib, "WS2_32.lib")
+#else
+#pragma comment(lib, "CORE_RL_bzlib_.lib")
+#pragma comment(lib, "CORE_RL_coders_.lib")
+#pragma comment(lib, "CORE_RL_filters_.lib")
+#pragma comment(lib, "CORE_RL_jbig_.lib")
+#pragma comment(lib, "CORE_RL_jp2_.lib")
+#pragma comment(lib, "CORE_RL_jpeg_.lib")
+#pragma comment(lib, "CORE_RL_lcms_.lib")
+#pragma comment(lib, "CORE_RL_libxml_.lib")
+#pragma comment(lib, "CORE_RL_Magick++_.lib")
+#pragma comment(lib, "CORE_RL_magick_.lib")
+#pragma comment(lib, "CORE_RL_png_.lib")
+#pragma comment(lib, "CORE_RL_tiff_.lib")
+#pragma comment(lib, "CORE_RL_ttf_.lib")
+#pragma comment(lib, "CORE_RL_wand_.lib")
+#pragma comment(lib, "CORE_RL_webp_.lib")
+#pragma comment(lib, "CORE_RL_wmf_.lib")
+#pragma comment(lib, "CORE_RL_xlib_.lib")
+#pragma comment(lib, "CORE_RL_zlib_.lib")
+#pragma comment(lib, "WS2_32.lib")
+#endif // _DEBUG
+
+class singleton {
+public:
+	static singleton* get_instance() {
+		if (nullptr == g_gm)
+			g_gm = new singleton();
+		return g_gm;
+	}
+
+	void info() {
+		printf("info() called\n");
+		m_image = new Magick::Image();
+		m_image->read(Magick::Geometry(1920, 1080), "C:\\Users\\userxxxx\\Desktop\\imgs\\bg1a.jpg");
+		printf("w: %d, h: %d\n", m_image->columns(), m_image->rows());
+	}
+
+	Magick::Image* m_image;
+
+private:
+	singleton() {
+		printf("singleton ctor\n");
+	}
+	~singleton() {
+		printf("singleton dtor\n");
+		delete m_image;
+	}
+
+	static singleton* g_gm;
+
+	class clean_singleton {
+	public:
+		clean_singleton() {
+			printf("clean_singleton ctor\n");
+		}
+		~clean_singleton() {
+			if (singleton::g_gm) {
+				delete singleton::g_gm;
+				singleton::g_gm = nullptr;
+			}
+			printf("clean_singleton dtor\n");
+		}
+	};
+
+	static clean_singleton cs;
+};
+
+singleton* singleton::g_gm = nullptr;
+singleton::clean_singleton singleton::cs;
+
+void t_singleton() {
+	singleton* p = singleton::get_instance();
+	p->info();
+}
+
+int main()
+{
+	Magick::InitializeMagick(NULL);
+	t_singleton();
+
+	return 0;
+}
+```
+
+有如下错误：
+
+![](files/singleton_0.png)
+
+首先注意的是在单例模式下要想析构函数正确调用，需要用到`clean_singleton`这个类来辅助析构，原`EImage`中没有这么处理，导致析构函数一直没被调用，当然在单例模式下，虽然堆内存不是自己释放的，但是最终还是由系统回收了这块内存，并没有导致内存泄漏，如果不是因为产生的大量的`gm`开头的临时文件，其实也不影响程序功能，但是它的结束过程是错误的。
+
+经过调试，正确的结束流程应该是（见`GM/Magick++/lib/Image.cpp`代码）：
+
+``` c++
+// GM/Magick++/lib/Image.cpp
+
+//
+// Cleanup class to ensure that ImageMagick singletons are destroyed
+// so as to avoid any resemblence to a memory leak (which seems to
+// confuse users)
+//
+namespace Magick
+{
+
+  class MagickCleanUp
+  {
+  public:
+    MagickCleanUp( void );
+    ~MagickCleanUp( void );
+  };
+
+  // The destructor for this object is invoked when the destructors for
+  // static objects in this translation unit are invoked.
+  static MagickCleanUp magickCleanUpGuard;
+}
+
+Magick::MagickCleanUp::MagickCleanUp ( void )
+{
+  // Don't even think about invoking InitializeMagick here!
+}
+
+Magick::MagickCleanUp::~MagickCleanUp ( void )
+{
+  MagickPlusPlusDestroyMagick();
+}
+```
+
+1. 正确的应该先清理`m_image`，再清理`singleton`类，最后清理`MagickCleanUp`。
+2. 而上述代码中的顺序却是完全相反，它先去调用了`MagickCleanUp`，最后再清理`m_image`。
+3. 因为`MagickCleanUp`调用`MagickPlusPlusDestroyMagick()`，`MagickPlusPlusDestroyMagick()`再调用`DestroyMagickResources()`导致`semaphore`被提前清除。
+4. 所以最终导致了如上图所示的`semaphore_info != (SemaphoreInfo *) NULL`断言失败。
+5. 而且由于``MagickCleanUp`过早调用，导致在清除`gm`开头的临时文件时发生`EACCESS`的错误，所以整个流程都乱套了。
+
+如何修复：
+
+1. 在程序退出前应该当首先手动清理`m_image`。
+2. 在单例模式下不能使用`RAII`来管理资源。
+
+最后应该注意关注`static`变量的构造的析构顺序，避免程序崩溃或者资源的不正确释放。
